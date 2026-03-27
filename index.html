@@ -122,6 +122,8 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
 .ingredient-add-row input::placeholder{color:var(--ink-faint);}
 .ingredient-add-row input.item-input{flex:1;min-width:120px;}
 .ingredient-add-row input.qty-input{width:70px;}
+.autosort-btn{background:transparent;color:var(--ink-muted);border:1px solid var(--border-strong);border-radius:4px;padding:10px 12px;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;flex-shrink:0;}
+.autosort-btn:active{border-color:var(--sage);color:var(--sage);background:var(--sage-light);}
 .store-select{background:transparent;border:none;border-bottom:1px solid var(--border-strong);outline:none;font-family:var(--sans);font-size:13px;color:var(--ink-muted);padding:8px 18px 8px 2px;cursor:pointer;max-width:130px;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23a09890'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 4px center;}
 .add-btn{background:var(--ink);color:var(--cream);border:none;border-radius:4px;padding:10px 16px;font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;flex-shrink:0;}
 
@@ -402,6 +404,7 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
           <input class="item-input" id="new-item" placeholder="Item name" onkeydown="if(event.key==='Enter')addIngredient()" />
           <input class="qty-input" id="new-qty" placeholder="Qty" onkeydown="if(event.key==='Enter')addIngredient()" />
           <select class="store-select" id="new-store"></select>
+          <button class="autosort-btn" onclick="autoSortIngredients()">Auto Sort</button>
           <button class="add-btn" onclick="addIngredient()">+ Add</button>
         </div>
         <div class="store-tabs-wrap" id="store-tabs-wrap" style="display:none;">
@@ -578,6 +581,36 @@ const fApp=initializeApp(FC);const db=getDatabase(fApp);const storage=getStorage
 const DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const UNCAT='__uncategorized__';const UNCAT_LABEL='Uncategorized';const CIRC=75.4;
 const MAX_PHOTOS=10;
+const AUTO_SORT_UNKNOWN='unknown';
+const AUTO_SORT_BUCKET_ORDER=['produce','dairy_eggs','meat_seafood','bakery','frozen','pantry','beverages','household',AUTO_SORT_UNKNOWN];
+const AUTO_SORT_BUCKET_RANK=AUTO_SORT_BUCKET_ORDER.reduce((acc,b,idx)=>{acc[b]=idx;return acc;},{});
+const AUTO_SORT_KEYWORDS={
+  produce:['apple','apples','avocado','avocados','banana','bananas','berry','berries','blueberry','blueberries','broccoli','cabbage','carrot','carrots','cauliflower','celery','cilantro','corn','cucumber','eggplant','garlic','ginger','grape','grapes','green bean','green beans','jalapeno','jalapenos','kale','kiwi','leek','lettuce','lime','limes','mango','mushroom','mushrooms','onion','onions','orange','oranges','parsley','peach','peaches','pear','pears','pepper','peppers','pineapple','plum','plums','potato','potatoes','red onion','roma tomato','spinach','squash','strawberry','strawberries','sweet potato','sweet potatoes','tomato','tomatoes','zucchini'],
+  dairy_eggs:['butter','cheddar','cheese','cottage cheese','cream','cream cheese','egg','eggs','feta','goat cheese','half and half','milk','mozzarella','parmesan','ricotta','sour cream','whipping cream','yogurt','yoghurt'],
+  meat_seafood:['bacon','beef','brisket','chicken','chicken breast','chicken thighs','crab','deli meat','ground beef','ground turkey','ham','lamb','pork','pork chop','prosciutto','salami','sausage','shrimp','steak','tilapia','tuna','turkey'],
+  bakery:['bagel','bagels','baguette','bread','bun','buns','cake','croissant','donut','flatbread','muffin','muffins','naan','pita','roll','rolls','sourdough','tortilla','tortillas','wrap','wraps'],
+  frozen:['frozen berry','frozen berries','frozen broccoli','frozen burrito','frozen chicken','frozen corn','frozen pizza','frozen spinach','frozen vegetable','frozen vegetables','ice cream','popsicle','sorbet'],
+  pantry:['baking powder','baking soda','beans','black beans','broth','cereal','chickpeas','chip','chips','coconut milk','coffee','cracker','crackers','flour','granola','honey','jam','jelly','ketchup','lentils','marinara','mayo','mayonnaise','mustard','noodle','noodles','oatmeal','oil','olive oil','pasta','peanut butter','pickle','pickles','rice','salt','sauce','soy sauce','spice','spices','stock','sugar','tea','tomato paste','vinegar'],
+  beverages:['almond milk','club soda','coke','cola','juice','kombucha','lemonade','orange juice','sparkling water','soda','sports drink','water','wine'],
+  household:['aluminum foil','bath tissue','cleaner','detergent','dish soap','dishwasher pods','garbage bag','garbage bags','laundry detergent','napkin','napkins','paper towel','paper towels','plastic wrap','soap','sponge','sponges','toilet paper','trash bag','trash bags','zip bag','zip bags']
+};
+const AUTO_SORT_EXACT_MAP=new Map();
+const AUTO_SORT_INDEX_BY_FIRST=new Map();
+const AUTO_SORT_NAME_CACHE=new Map();
+const AUTO_SORT_MAX_CACHE=12000;
+
+function buildAutoSortKeywordIndex(){
+  Object.entries(AUTO_SORT_KEYWORDS).forEach(([bucket,terms])=>{
+    terms.forEach(term=>{
+      const normalized=normalizeForAutoSort(term);
+      if(!normalized)return;
+      AUTO_SORT_EXACT_MAP.set(normalized,bucket);
+      const first=normalized[0]||'_';
+      if(!AUTO_SORT_INDEX_BY_FIRST.has(first))AUTO_SORT_INDEX_BY_FIRST.set(first,[]);
+      AUTO_SORT_INDEX_BY_FIRST.get(first).push({term:normalized,bucket,len:normalized.length});
+    });
+  });
+}
 
 // Palette for auto-assigned family colors
 const FAM_PALETTE=[
@@ -617,6 +650,108 @@ function setSyncDot(s){document.getElementById('sync-dot').className='sync-dot '
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2400);}
 function dbPath(path){return dbRef(db,`households/${currentFamily}/${path}`);}
 function showError(msg){const b=document.getElementById('error-banner');if(!b)return;b.textContent='Error: '+msg;b.classList.add('visible');setTimeout(()=>b.classList.remove('visible'),8000);}
+
+function singularizeToken(token){
+  if(token.length<=3)return token;
+  if(token.endsWith('ies')&&token.length>4)return token.slice(0,-3)+'y';
+  if(token.endsWith('oes')&&token.length>4)return token.slice(0,-2);
+  if(token.endsWith('es')&&token.length>4)return token.slice(0,-2);
+  if(token.endsWith('s')&&!token.endsWith('ss')&&token.length>3)return token.slice(0,-1);
+  return token;
+}
+
+function normalizeForAutoSort(input){
+  return(input||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function tokenizeForAutoSort(input){
+  const normalized=normalizeForAutoSort(input);
+  if(!normalized)return[];
+  return normalized.split(' ').flatMap(tok=>{const base=singularizeToken(tok);return base&&base!==tok?[tok,base]:[tok];}).filter(Boolean);
+}
+
+function boundedEditDistance(a,b,maxDistance=2){
+  const al=a.length,bl=b.length;
+  if(Math.abs(al-bl)>maxDistance)return maxDistance+1;
+  let prev=new Array(bl+1);
+  let cur=new Array(bl+1);
+  for(let j=0;j<=bl;j++)prev[j]=j;
+  for(let i=1;i<=al;i++){
+    cur[0]=i;
+    let rowMin=cur[0];
+    for(let j=1;j<=bl;j++){
+      const cost=a[i-1]===b[j-1]?0:1;
+      cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+cost);
+      if(cur[j]<rowMin)rowMin=cur[j];
+    }
+    if(rowMin>maxDistance)return maxDistance+1;
+    const tmp=prev;prev=cur;cur=tmp;
+  }
+  return prev[bl];
+}
+
+function classifyIngredientName(name){
+  const normalized=normalizeForAutoSort(name);
+  if(!normalized)return{bucket:AUTO_SORT_UNKNOWN,confidence:0};
+  if(AUTO_SORT_NAME_CACHE.has(normalized))return AUTO_SORT_NAME_CACHE.get(normalized);
+
+  const tokens=tokenizeForAutoSort(normalized);
+  let bucket=AUTO_SORT_EXACT_MAP.get(normalized)||null;
+  let confidence=bucket?1:0;
+
+  if(!bucket){
+    for(const token of tokens){
+      const exactBucket=AUTO_SORT_EXACT_MAP.get(token);
+      if(exactBucket){bucket=exactBucket;confidence=0.95;break;}
+    }
+  }
+
+  if(!bucket){
+    let best=null;
+    for(const token of tokens){
+      if(token.length<4)continue;
+      const first=token[0]||'_';
+      const candidates=AUTO_SORT_INDEX_BY_FIRST.get(first)||[];
+      for(let i=0;i<candidates.length;i++){
+        const candidate=candidates[i];
+        if(Math.abs(candidate.len-token.length)>2)continue;
+        const dist=boundedEditDistance(token,candidate.term,2);
+        if(dist>2)continue;
+        const score=dist===0?0.9:dist===1?0.72:0.6;
+        if(!best||score>best.score)best={bucket:candidate.bucket,score};
+      }
+      if(best&&best.score>=0.72)break;
+    }
+    if(best){bucket=best.bucket;confidence=best.score;}
+  }
+
+  if(!bucket){bucket=AUTO_SORT_UNKNOWN;confidence=0;}
+  const result={bucket,confidence};
+  AUTO_SORT_NAME_CACHE.set(normalized,result);
+  if(AUTO_SORT_NAME_CACHE.size>AUTO_SORT_MAX_CACHE){
+    const firstKey=AUTO_SORT_NAME_CACHE.keys().next().value;
+    if(firstKey)AUTO_SORT_NAME_CACHE.delete(firstKey);
+  }
+  return result;
+}
+
+function getAutoSortRankForItem(item){
+  if(item&&typeof item.sortRank==='number')return item.sortRank;
+  const match=classifyIngredientName(item&&item.name?item.name:'');
+  return AUTO_SORT_BUCKET_RANK[match.bucket]??AUTO_SORT_BUCKET_RANK[AUTO_SORT_UNKNOWN];
+}
+
+function compareIngredientRows(a,b){
+  const rankA=getAutoSortRankForItem(a[1]);
+  const rankB=getAutoSortRankForItem(b[1]);
+  if(rankA!==rankB)return rankA-rankB;
+  const nameA=normalizeForAutoSort(a[1]&&a[1].name?a[1].name:'');
+  const nameB=normalizeForAutoSort(b[1]&&b[1].name?b[1].name:'');
+  if(nameA!==nameB)return nameA<nameB?-1:1;
+  return a[0]<b[0]?-1:1;
+}
+
+buildAutoSortKeywordIndex();
 
 // ── FAMILY COLOR ──
 function famColor(fam){const idx=fam.colorIdx||0;return FAM_PALETTE[idx%FAM_PALETTE.length];}
@@ -788,6 +923,20 @@ window.addIngredient=function(){
 };
 window.toggleItem=function(id,cur){setSyncDot('syncing');update(dbPath('current/ingredients/'+id),{checked:!cur}).then(()=>setSyncDot('online'));};
 window.deleteItem=function(id){setSyncDot('syncing');remove(dbPath('current/ingredients/'+id)).then(()=>setSyncDot('online'));};
+window.autoSortIngredients=async function(){
+  const entries=Object.entries(localIngredients);
+  if(!entries.length){showToast('No items to sort yet.');return;}
+  const sorted=entries.slice().sort(compareIngredientRows);
+  const updates={};
+  sorted.forEach(([id,item],idx)=>{
+    updates[`households/${currentFamily}/current/ingredients/${id}/sortPos`]=idx;
+    updates[`households/${currentFamily}/current/ingredients/${id}/sortRank`]=getAutoSortRankForItem(item);
+  });
+  setSyncDot('syncing');
+  await update(dbRef(db),updates);
+  setSyncDot('online');
+  showToast('List auto-sorted.');
+};
 
 function ingredientRow(id,item){
   const div=document.createElement('div');div.className='ingredient-item'+(item.checked?' checked':'');
@@ -805,11 +954,10 @@ function renderIngredients(){
   if(activeTab==='all'){
     const groups={};items.forEach(([id,item])=>{const sid=item.storeId||UNCAT;if(!groups[sid])groups[sid]=[];groups[sid].push([id,item]);});
     const keys=[...storeList().map(s=>s.id).filter(sid=>groups[sid]),...(groups[UNCAT]?[UNCAT]:[])];
-    keys.forEach(sid=>{const g=document.createElement('div');g.className='store-group';const h=document.createElement('div');h.className='store-group-header';h.innerHTML=`${esc(storeName(sid))} <span class="store-group-count">${groups[sid].length}</span>`;g.appendChild(h);groups[sid].forEach(([id,item])=>g.appendChild(ingredientRow(id,item)));el.appendChild(g);});
-  }else{items.forEach(([id,item])=>el.appendChild(ingredientRow(id,item)));}
+    keys.forEach(sid=>{groups[sid].sort(compareIngredientRows);const g=document.createElement('div');g.className='store-group';const h=document.createElement('div');h.className='store-group-header';h.innerHTML=`${esc(storeName(sid))} <span class="store-group-count">${groups[sid].length}</span>`;g.appendChild(h);groups[sid].forEach(([id,item])=>g.appendChild(ingredientRow(id,item)));el.appendChild(g);});
+  }else{items.sort(compareIngredientRows);items.forEach(([id,item])=>el.appendChild(ingredientRow(id,item)));}
   renderUnpurchased();
 }
-
 function renderUnpurchased(){
   const box=document.getElementById('unpurchased-items');const badge=document.getElementById('up-count');
   const up=Object.entries(localIngredients).filter(([,x])=>!x.checked);badge.textContent=up.length;
@@ -817,9 +965,8 @@ function renderUnpurchased(){
   const groups={};up.forEach(([,item])=>{const sid=item.storeId||UNCAT;if(!groups[sid])groups[sid]=[];groups[sid].push(item);});
   const keys=[...storeList().map(s=>s.id).filter(sid=>groups[sid]),...(groups[UNCAT]?[UNCAT]:[])];
   const multi=keys.length>1;box.innerHTML='';
-  keys.forEach(sid=>{const g=document.createElement('div');g.className='up-store-group';if(multi){const l=document.createElement('div');l.className='up-store-label';l.textContent=storeName(sid);g.appendChild(l);}const p=document.createElement('div');p.className='up-pills';groups[sid].forEach(item=>{const pill=document.createElement('span');pill.className='up-pill';pill.textContent=item.name+(item.qty?' · '+item.qty:'');p.appendChild(pill);});g.appendChild(p);box.appendChild(g);});
+  keys.forEach(sid=>{groups[sid].sort((a,b)=>{const rankA=getAutoSortRankForItem(a);const rankB=getAutoSortRankForItem(b);if(rankA!==rankB)return rankA-rankB;const nameA=normalizeForAutoSort(a.name||'');const nameB=normalizeForAutoSort(b.name||'');if(nameA!==nameB)return nameA<nameB?-1:1;return 0;});const g=document.createElement('div');g.className='up-store-group';if(multi){const l=document.createElement('div');l.className='up-store-label';l.textContent=storeName(sid);g.appendChild(l);}const p=document.createElement('div');p.className='up-pills';groups[sid].forEach(item=>{const pill=document.createElement('span');pill.className='up-pill';pill.textContent=item.name+(item.qty?' · '+item.qty:'');p.appendChild(pill);});g.appendChild(p);box.appendChild(g);});
 }
-
 // ── PHOTO COMPRESSION ──
 function compressImage(file){
   return new Promise((resolve,reject)=>{
