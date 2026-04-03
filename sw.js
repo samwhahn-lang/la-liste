@@ -1,4 +1,4 @@
-const VERSION = 'la-liste-v5';
+const VERSION = 'la-liste-v7';
 const CACHE = VERSION;
 const PRECACHE = ['/la-liste/', '/la-liste/index.html', '/la-liste/manifest.json'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRECACHE))); });
