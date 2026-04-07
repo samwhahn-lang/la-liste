@@ -83,7 +83,7 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
 .recipe-row:first-child{border-top:1px solid var(--border);}
 .recipe-cell{padding:7px 5px;border-right:1px solid var(--border);display:flex;align-items:center;min-width:0;}
 .recipe-cell:last-child{border-right:none;justify-content:center;align-items:center;}
-.recipe-cell.day-label{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-muted);background:rgba(28,26,22,.025);justify-content:center;align-items:flex-start;padding-top:10px;}
+.recipe-cell.day-label{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-muted);background:rgba(28,26,22,.025);justify-content:center;align-items:center;text-align:center;flex-direction:column;line-height:1.2;}
 .recipe-cell.cook-cell{justify-content:center;align-items:flex-start;padding-top:8px;flex-direction:column;gap:3px;}
 .recipe-cell textarea{background:none;border:none;outline:none;width:100%;font-family:var(--sans);font-size:13px;color:var(--ink);resize:none;overflow:hidden;min-height:34px;line-height:1.5;padding:0;display:block;}
 .recipe-cell textarea::placeholder{color:var(--ink-faint);}
@@ -943,7 +943,11 @@ window.deleteRecipePhoto=async function(dayIndex,photoKey){const r=localRecipes[
 // ── RECIPE GRID ──
 function buildRecipeGrid(){
   const g=document.getElementById('recipe-grid');g.innerHTML='';
+  const now=new Date();
+  const monday=new Date(now);monday.setDate(now.getDate()-JS_DAY_TO_IDX[now.getDay()]);
   DAYS.forEach((day,i)=>{
+    const d=new Date(monday);d.setDate(monday.getDate()+i);
+    const ds=(d.getMonth()+1)+'-'+d.getDate().toString().padStart(2,'0');
     const r=localRecipes[i]||{};const row=document.createElement('div');row.className='recipe-row';
     // cook pill
     let cookHTML='';
@@ -960,7 +964,7 @@ function buildRecipeGrid(){
     const cbHTML=`<button class="cookbook-trigger${cbVal?'':' empty'}" onclick="openCookbookSheet(${i})">${cbVal?esc(cbVal):'Cookbook'}</button>`;
 
     row.innerHTML=`
-      <div class="recipe-cell day-label">${day.slice(0,3)}</div>
+      <div class="recipe-cell day-label"><span>${day.slice(0,3)}</span><span>${ds}</span></div>
       <div class="recipe-cell cook-cell">${cookHTML}</div>
       <div class="recipe-cell"><textarea rows="1" placeholder="Recipe name" oninput="autoResizeTA(this);debouncePushRecipe(${i},'name',this.value)">${esc(r.name||'')}</textarea></div>
       <div class="recipe-cell" style="padding:6px 5px;">${cbHTML}</div>
