@@ -129,7 +129,8 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
 .ingredient-add-row input.item-input{flex:1;min-width:120px;}
 .ingredient-add-row input.qty-input{width:70px;}
 .store-select{background:transparent;border:none;border-bottom:1px solid var(--border-strong);outline:none;font-family:var(--sans);font-size:13px;color:var(--ink-muted);padding:8px 18px 8px 2px;cursor:pointer;max-width:130px;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23a09890'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 4px center;}
-.add-btn{background:var(--ink);color:var(--cream);border:none;border-radius:4px;padding:10px 16px;font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;flex-shrink:0;}
+.add-btn{background:var(--ink);color:var(--cream);border:none;border-radius:4px;padding:12px 18px;font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;flex-shrink:0;}
+.add-store-btn{background:var(--ink);color:var(--cream);border:none;border-radius:4px;padding:6px 10px;font-family:var(--sans);font-size:11px;font-weight:600;cursor:pointer;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;margin-left:8px;}
 
 /* INGREDIENT ITEMS */
 .ingredient-item{display:flex;align-items:center;gap:8px;padding:11px 0;border-bottom:1px solid var(--border);}
@@ -450,6 +451,7 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
           <input class="qty-input" id="new-qty" placeholder="Qty" onkeydown="if(event.key==='Enter')addIngredient()" />
           <select class="store-select" id="new-store"></select>
           <button class="add-btn" onclick="addIngredient()">+ Add</button>
+          <button class="add-store-btn" onclick="addNewStore()">+ Store</button>
         </div>
         <div class="store-tabs-wrap" id="store-tabs-wrap" style="display:none;">
           <div class="store-tabs" id="store-tabs"></div>
@@ -883,6 +885,7 @@ function rebuildStoreSelect(id='new-store'){const sel=document.getElementById(id
 function rebuildAllStoreSelects(){['new-store','lb-new-store','edit-store'].forEach(id=>rebuildStoreSelect(id));}
 function rebuildStoreTabs(){const wrap=document.getElementById('store-tabs');if(!wrap)return;const stores=storeList();document.getElementById('store-tabs-wrap').style.display=stores.length>0?'block':'none';if(!stores.length){activeTab='all';return;}wrap.innerHTML='';const mk=(label,id)=>{const b=document.createElement('button');b.className='store-tab'+(activeTab===id?' active':'');b.textContent=label;b.onclick=()=>{activeTab=id;rebuildStoreTabs();renderIngredients();};wrap.appendChild(b);};mk('All','all');stores.forEach(s=>mk(s.name,s.id));const uc=Object.values(localIngredients).filter(x=>!x.storeId||x.storeId===UNCAT).length;if(uc>0)mk(UNCAT_LABEL,UNCAT);else if(activeTab===UNCAT)activeTab='all';}
 window.addStore=async function(){const input=document.getElementById('store-add-input');const name=(input.value||'').trim();if(!name)return;if(Object.values(localStores).some(s=>s.name.toLowerCase()===name.toLowerCase())){showToast('Store already exists.');return;}await push(dbPath('stores'),{name,order:Object.keys(localStores).length});input.value='';showToast(name+' added!');};
+window.addNewStore=async function(){const name=prompt('Add a new grocery store:');if(!name||!name.trim())return;const trimmed=name.trim();if(Object.values(localStores).some(s=>s.name.toLowerCase()===trimmed.toLowerCase())){showToast('Store already exists.');return;}setSyncDot('syncing');await push(dbPath('stores'),{name:trimmed,order:Object.keys(localStores).length});setSyncDot('online');showToast(trimmed+' added!');};
 window.deleteStore=async function(storeId){if(!confirm(`Remove "${storeName(storeId)}"?`))return;const updates={};Object.entries(localIngredients).forEach(([id,item])=>{if(item.storeId===storeId)updates[`households/${currentFamily}/current/ingredients/${id}/storeId`]=UNCAT;});if(Object.keys(updates).length)await update(dbRef(db),updates);await remove(dbPath('stores/'+storeId));if(activeTab===storeId)activeTab='all';showToast('Store removed.');};
 window.openStorePicker=function(itemId){const item=localIngredients[itemId];const cur=(item&&item.storeId)||UNCAT;const opts=document.getElementById('store-picker-options');opts.innerHTML='';const mk=(label,sid)=>{const b=document.createElement('button');b.className='store-picker-option'+(cur===sid?' selected':'');b.textContent=label;b.onclick=()=>assignStore(itemId,sid);opts.appendChild(b);};mk(UNCAT_LABEL,UNCAT);storeList().forEach(s=>mk(s.name,s.id));document.getElementById('store-picker-modal').style.display='flex';};
 window.closeStorePicker=function(){document.getElementById('store-picker-modal').style.display='none';};
@@ -944,35 +947,50 @@ window.deleteRecipePhoto=async function(dayIndex,photoKey){const r=localRecipes[
 function buildRecipeGrid(){
   const g=document.getElementById('recipe-grid');g.innerHTML='';
   const now=new Date();
-  const monday=new Date(now);monday.setDate(now.getDate()-JS_DAY_TO_IDX[now.getDay()]);
-  DAYS.forEach((day,i)=>{
-    const d=new Date(monday);d.setDate(monday.getDate()+i);
-    const ds=(d.getMonth()+1)+'-'+d.getDate().toString().padStart(2,'0');
-    const r=localRecipes[i]||{};const row=document.createElement('div');row.className='recipe-row';
+  const startDate = new Date(now);
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    const dayIdx = JS_DAY_TO_IDX[d.getDay()];
+    const dayName = DAYS[dayIdx];
+    const ds = (d.getMonth()+1) + '-' + d.getDate().toString().padStart(2,'0');
+    const r = localRecipes[dayIdx] || {};
+    const row = document.createElement('div');
+    row.className = 'recipe-row';
     // cook pill
-    let cookHTML='';
-    if(r.cookKey&&localCooks[r.cookKey]){const cook=localCooks[r.cookKey];const c=cookColor(cook);cookHTML=`<button class="cook-pill" style="background:${c.bg};color:${c.fg}" onclick="openCookPicker(${i})" title="${esc(cook.name)}">${esc(cookInitial(cook))}</button>`;}
-    else{cookHTML=`<button class="cook-add-btn" onclick="openCookPicker(${i})" title="Assign cook">+</button>`;}
+    let cookHTML = '';
+    if (r.cookKey && localCooks[r.cookKey]) {
+      const cook = localCooks[r.cookKey];
+      const c = cookColor(cook);
+      cookHTML = `<button class="cook-pill" style="background:${c.bg};color:${c.fg}" onclick="openCookPicker(${dayIdx})" title="${esc(cook.name)}">${esc(cookInitial(cook))}</button>`;
+    } else {
+      cookHTML = `<button class="cook-add-btn" onclick="openCookPicker(${dayIdx})" title="Assign cook">+</button>`;
+    }
     // photos
-    const photos=getPhotosForDay(i);const count=photos.length;
-    let photoHTML=`<div class="photo-cell-inner">`;
-    photos.forEach((p,pi)=>{photoHTML+=`<div class="photo-thumb-wrap"><img class="photo-thumb" src="${esc(p.url)}" onclick="openRecipeLightbox(${i},${pi})" alt="" />${count>1&&pi===0?'<span class="photo-main-badge">main</span>':''}<button class="photo-del-btn" onclick="event.stopPropagation();deleteRecipePhoto(${i},'${p.key}')">×</button></div>`;});
-    if(count<MAX_PHOTOS){photoHTML+=`<label class="photo-add-btn" for="file-input-${i}" title="Add photo">+<input type="file" id="file-input-${i}" class="photo-file-input" accept="image/jpeg,image/png,image/heic,image/webp" onchange="handlePhotoChange(event,${i})" /></label>`;}
-    photoHTML+=`</div>`;
+    const photos = getPhotosForDay(dayIdx);
+    const count = photos.length;
+    let photoHTML = `<div class="photo-cell-inner">`;
+    photos.forEach((p, pi) => {
+      photoHTML += `<div class="photo-thumb-wrap"><img class="photo-thumb" src="${esc(p.url)}" onclick="openRecipeLightbox(${dayIdx},${pi})" alt="" />${count > 1 && pi === 0 ? '<span class="photo-main-badge">main</span>' : ''}<button class="photo-del-btn" onclick="event.stopPropagation();deleteRecipePhoto(${dayIdx},'${p.key}')">×</button></div>`;
+    });
+    if (count < MAX_PHOTOS) {
+      photoHTML += `<label class="photo-add-btn" for="file-input-${dayIdx}" title="Add photo">+<input type="file" id="file-input-${dayIdx}" class="photo-file-input" accept="image/jpeg,image/png,image/heic,image/webp" onchange="handlePhotoChange(event,${dayIdx})" /></label>`;
+    }
+    photoHTML += `</div>`;
     // cookbook trigger button
-    const cbVal=r.cookbook||'';
-    const cbHTML=`<button class="cookbook-trigger${cbVal?'':' empty'}" onclick="openCookbookSheet(${i})">${cbVal?esc(cbVal):'Cookbook'}</button>`;
+    const cbVal = r.cookbook || '';
+    const cbHTML = `<button class="cookbook-trigger${cbVal ? '' : ' empty'}" onclick="openCookbookSheet(${dayIdx})">${cbVal ? esc(cbVal) : 'Cookbook'}</button>`;
 
-    row.innerHTML=`
-      <div class="recipe-cell day-label"><span>${day.slice(0,3)}</span><span>${ds}</span></div>
+    row.innerHTML = `
+      <div class="recipe-cell day-label"><span>${dayName.slice(0,3)}</span><span>${ds}</span></div>
       <div class="recipe-cell cook-cell">${cookHTML}</div>
-      <div class="recipe-cell"><textarea rows="1" placeholder="Recipe name" oninput="autoResizeTA(this);debouncePushRecipe(${i},'name',this.value)">${esc(r.name||'')}</textarea></div>
+      <div class="recipe-cell"><textarea rows="1" placeholder="Recipe name" oninput="autoResizeTA(this);debouncePushRecipe(${dayIdx},'name',this.value)">${esc(r.name || '')}</textarea></div>
       <div class="recipe-cell" style="padding:6px 5px;">${cbHTML}</div>
-      <div class="recipe-cell"><input class="page-input" placeholder="p." value="${esc(r.page||'')}" oninput="debouncePushRecipe(${i},'page',this.value)" /></div>
-      <div class="recipe-cell" id="photo-cell-${i}">${photoHTML}</div>`;
+      <div class="recipe-cell"><input class="page-input" placeholder="p." value="${esc(r.page || '')}" oninput="debouncePushRecipe(${dayIdx},'page',this.value)" /></div>
+      <div class="recipe-cell" id="photo-cell-${dayIdx}">${photoHTML}</div>`;
     g.appendChild(row);
-    requestAnimationFrame(()=>row.querySelectorAll('textarea').forEach(ta=>autoResizeTA(ta)));
-  });
+    requestAnimationFrame(() => row.querySelectorAll('textarea').forEach(ta => autoResizeTA(ta)));
+  }
 }
 window.autoResizeTA=function(ta){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';};
 
@@ -1095,7 +1113,8 @@ function bootFamily(key){
   const now=new Date();document.getElementById('list-date').textContent='— '+formatDateFull(now)+' —';
   get(dbPath('current/title')).then(async snap=>{
     document.getElementById('loading-screen').style.display='none';document.getElementById('main-content').style.display='block';
-    if(!snap.val())set(dbPath('current/title'),'Week of '+now.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}));
+    const weekOf = new Date(now.getTime() - 24*60*60*1000);
+    if(!snap.val())set(dbPath('current/title'),'Week of '+weekOf.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}));
     setSyncDot('online');attachListeners();maybeShowPermissionBanner();
   }).catch(()=>{document.getElementById('loading-screen').innerHTML='<div style="color:var(--rust);font-style:italic;text-align:center;padding:0 24px;">Could not connect.<br>Check your internet.</div>';});
 }
