@@ -1,6 +1,6 @@
 const VERSION = 'la-liste-v7';
 const CACHE = VERSION;
-const PRECACHE = ['/la-liste/', '/la-liste/index.html', '/la-liste/manifest.json'];
+const PRECACHE = ['/', '/index.html', '/manifest.json'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRECACHE))); });
 self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', event => {

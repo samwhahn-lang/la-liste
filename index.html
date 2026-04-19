@@ -659,7 +659,7 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
 
 <script>
 let swReg=null,newWorker=null;
-if('serviceWorker'in navigator){navigator.serviceWorker.register('/la-liste/sw.js').then(r=>{swReg=r;r.addEventListener('updatefound',()=>{newWorker=r.installing;newWorker.addEventListener('statechange',()=>{if(newWorker.state==='installed'&&navigator.serviceWorker.controller)document.getElementById('update-banner').style.display='flex';});});}).catch(()=>{});navigator.serviceWorker.addEventListener('controllerchange',()=>window.location.reload());}
+if('serviceWorker'in navigator){navigator.serviceWorker.register('sw.js').then(r=>{swReg=r;r.addEventListener('updatefound',()=>{newWorker=r.installing;newWorker.addEventListener('statechange',()=>{if(newWorker.state==='installed'&&navigator.serviceWorker.controller)document.getElementById('update-banner').style.display='flex';});});}).catch(()=>{});navigator.serviceWorker.addEventListener('controllerchange',()=>window.location.reload());}
 window.applyUpdate=()=>{if(newWorker)newWorker.postMessage({action:'skipWaiting'});};
 window.dismissPermissionBanner=()=>{document.getElementById('permission-banner').style.display='none';localStorage.setItem('la_liste_permission_seen','1');};
 function maybeShowPermissionBanner(){if(!localStorage.getItem('la_liste_permission_seen')&&/iPhone|iPad|iPod/.test(navigator.userAgent))document.getElementById('permission-banner').style.display='flex';}
