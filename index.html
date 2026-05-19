@@ -690,7 +690,7 @@ const COOK_COLORS=[
 let currentFamily=null,allFamilies={};
 let localIngredients={},localRecipes={},localStores={},localFavorites={},historyData={};
 let localCooks={};       // { cookKey: { name, colorIdx } }
-let localCookbooks=[];   // ordered array of strings
+let localCookbooks={};   // {key: {name, createdAt}}
 let localResetDay=null,localLastResetDate=null;
 let activeTab='all';
 let lightboxDateKey=null,lightboxPhotoKeys=[],lightboxPhotoIndex=0,swipeStartX=0;
@@ -708,6 +708,21 @@ function toISODate(d){return d.toISOString().slice(0,10);}
 function dayNameFromIso(isoDate){const d=new Date(isoDate+'T12:00:00');return DAYS[JS_DAY_TO_IDX[d.getDay()]];}
 function rollingWindow(){const now=new Date();const dates=[];for(let i=0;i<7;i++){const d=new Date(now);d.setDate(now.getDate()+i);dates.push(toISODate(d));}return dates;}
 function labelForRecipeKey(key){if(/^[0-6]$/.test(key))return DAYS[parseInt(key)];return dayNameFromIso(key);}
+async function writeAudit(action,recordType,recordId,data){
+  const expiresAt=Date.now()+(90*24*60*60*1000);
+  await push(dbPath('audit'),{action,recordType,recordId:String(recordId),data:data||{},timestamp:new Date().toISOString(),expiresAt});
+}
+async function purgeExpiredAudit(){
+  const snap=await get(dbPath('audit'));const entries=snap.val();if(!entries)return;
+  const now=Date.now();const updates={};
+  Object.entries(entries).forEach(([key,e])=>{if(e.expiresAt&&e.expiresAt<now)updates[`households/${currentFamily}/audit/${key}`]=null;});
+  if(Object.keys(updates).length)await update(dbRef(db),updates);
+}
+async function migrateArrayCookbooks(arr){
+  const newCookbooks={};
+  arr.forEach((name,i)=>{if(name)newCookbooks[`cb${i}_${Date.now()}`]={name,createdAt:new Date().toISOString()};});
+  await set(dbPath('cookbooks'),Object.keys(newCookbooks).length?newCookbooks:null);
+}
 async function migrateRecipesToDates(){
   const snap=await get(dbPath('current/recipes'));const recipes=snap.val();if(!recipes)return;
   const oldKeys=Object.keys(recipes).filter(k=>/^[0-6]$/.test(k));if(!oldKeys.length)return;
@@ -781,6 +796,7 @@ window.addCookFromSheet=async function(){
 
 window.removeCook=async function(cookKey){
   if(!confirm('Remove this cook?'))return;
+  await writeAudit('delete','cook',cookKey,localCooks[cookKey]||{});
   await remove(dbPath('cooks/'+cookKey));
   // unassign from any days
   const updates={};
@@ -802,12 +818,13 @@ window.closeCookbookSheet=function(){document.getElementById('cookbook-sheet').s
 
 function renderCookbookList(selectedVal){
   const el=document.getElementById('cookbook-list');el.innerHTML='';
-  if(!localCookbooks.length){el.innerHTML='<div style="font-size:13px;color:var(--ink-faint);font-style:italic;padding:8px 0;">No cookbooks saved yet. Add one below.</div>';return;}
-  localCookbooks.forEach((title,idx)=>{
+  const entries=Object.entries(localCookbooks).sort((a,b)=>(a[1].createdAt||'')>=(b[1].createdAt||'')?1:-1);
+  if(!entries.length){el.innerHTML='<div style="font-size:13px;color:var(--ink-faint);font-style:italic;padding:8px 0;">No cookbooks saved yet. Add one below.</div>';return;}
+  entries.forEach(([key,cb])=>{
     const item=document.createElement('div');
-    item.className='cookbook-list-item'+(title===selectedVal?' selected':'');
-    item.innerHTML=`<span style="flex:1">${esc(title)}</span><button class="cookbook-list-del" onclick="event.stopPropagation();removeCookbook(${idx})" title="Remove">×</button>`;
-    item.onclick=()=>selectCookbook(title);
+    item.className='cookbook-list-item'+(cb.name===selectedVal?' selected':'');
+    item.innerHTML=`<span style="flex:1">${esc(cb.name)}</span><button class="cookbook-list-del" onclick="event.stopPropagation();removeCookbook('${key}')" title="Remove">×</button>`;
+    item.onclick=()=>selectCookbook(cb.name);
     el.appendChild(item);
   });
 }
@@ -822,17 +839,17 @@ window.selectCookbook=async function(title){
 window.addCookbookFromSheet=async function(){
   const input=document.getElementById('cookbook-add-input');const title=(input.value||'').trim();
   if(!title){input.focus();return;}
-  if(localCookbooks.includes(title)){selectCookbook(title);return;}
-  const updated=[...localCookbooks,title];
+  if(Object.values(localCookbooks).some(cb=>cb.name===title)){selectCookbook(title);return;}
   setSyncDot('syncing');
-  await set(dbPath('cookbooks'),updated);
+  await push(dbPath('cookbooks'),{name:title,createdAt:new Date().toISOString()});
   setSyncDot('online');input.value='';
   selectCookbook(title);
 };
 
-window.removeCookbook=async function(idx){
-  const updated=localCookbooks.filter((_,i)=>i!==idx);
-  await set(dbPath('cookbooks'),updated);
+window.removeCookbook=async function(key){
+  const cb=localCookbooks[key];
+  await writeAudit('delete','cookbook',key,cb||{});
+  await remove(dbPath('cookbooks/'+key));
   showToast('Cookbook removed.');
   const r=(cookbookPickerDateKey&&localRecipes[cookbookPickerDateKey])||{};
   renderCookbookList(r.cookbook||'');
@@ -906,12 +923,12 @@ async function assignStore(itemId,storeId){closeStorePicker();setSyncDot('syncin
 // ── INGREDIENT EDIT ──
 window.openEditSheet=function(id){const item=localIngredients[id];if(!item)return;editingItemId=id;document.getElementById('edit-name').value=item.name||'';document.getElementById('edit-qty').value=item.qty||'';rebuildStoreSelect('edit-store');document.getElementById('edit-store').value=item.storeId||UNCAT;document.getElementById('edit-sheet').style.display='flex';};
 window.closeEditSheet=function(){document.getElementById('edit-sheet').style.display='none';editingItemId=null;};
-window.saveEditIngredient=async function(){if(!editingItemId)return;const name=document.getElementById('edit-name').value.trim();if(!name){showToast('Name is required.');return;}setSyncDot('syncing');await update(dbPath('current/ingredients/'+editingItemId),{name,qty:document.getElementById('edit-qty').value.trim(),storeId:document.getElementById('edit-store').value||UNCAT});setSyncDot('online');closeEditSheet();showToast('Ingredient updated.');};
+window.saveEditIngredient=async function(){if(!editingItemId)return;const name=document.getElementById('edit-name').value.trim();if(!name){showToast('Name is required.');return;}setSyncDot('syncing');await update(dbPath('current/ingredients/'+editingItemId),{name,qty:document.getElementById('edit-qty').value.trim(),storeId:document.getElementById('edit-store').value||UNCAT,updatedAt:new Date().toISOString()});setSyncDot('online');closeEditSheet();showToast('Ingredient updated.');};
 
 // ── INGREDIENTS ──
-window.addIngredient=function(){const nameEl=document.getElementById('new-item');const qtyEl=document.getElementById('new-qty');const storeEl=document.getElementById('new-store');const name=nameEl.value.trim();if(!name){nameEl.focus();return;}setSyncDot('syncing');push(dbPath('current/ingredients'),{name,qty:qtyEl.value.trim(),checked:false,storeId:(storeEl&&storeEl.value)||UNCAT}).then(()=>setSyncDot('online'));nameEl.value='';qtyEl.value='';nameEl.focus();};
+window.addIngredient=function(){const nameEl=document.getElementById('new-item');const qtyEl=document.getElementById('new-qty');const storeEl=document.getElementById('new-store');const name=nameEl.value.trim();if(!name){nameEl.focus();return;}setSyncDot('syncing');push(dbPath('current/ingredients'),{name,qty:qtyEl.value.trim(),checked:false,storeId:(storeEl&&storeEl.value)||UNCAT,createdAt:new Date().toISOString()}).then(()=>setSyncDot('online'));nameEl.value='';qtyEl.value='';nameEl.focus();};
 window.toggleItem=function(id,cur){setSyncDot('syncing');update(dbPath('current/ingredients/'+id),{checked:!cur}).then(()=>setSyncDot('online'));};
-window.deleteItem=function(id){setSyncDot('syncing');remove(dbPath('current/ingredients/'+id)).then(()=>setSyncDot('online'));};
+window.deleteItem=async function(id){setSyncDot('syncing');await writeAudit('delete','ingredient',id,localIngredients[id]||{});await remove(dbPath('current/ingredients/'+id));setSyncDot('online');};
 
 function ingredientRow(id,item){
   const div=document.createElement('div');div.className='ingredient-item'+(item.checked?' checked':'');
@@ -1057,7 +1074,7 @@ window.openFavLightbox=function(url,caption){window.openHistoryLightbox(url,capt
 window.closeLightbox=function(){document.getElementById('lightbox').style.display='none';lbAddedItems=[];document.getElementById('lb-new-item').value='';document.getElementById('lb-new-qty').value='';};
 document.getElementById('lightbox').addEventListener('click',function(e){if(e.target===this)closeLightbox();});
 
-window.lbAddIngredient=function(){const nameEl=document.getElementById('lb-new-item');const qtyEl=document.getElementById('lb-new-qty');const storeEl=document.getElementById('lb-new-store');const name=nameEl.value.trim();if(!name){nameEl.focus();return;}const storeId=(storeEl&&storeEl.value)||UNCAT;setSyncDot('syncing');push(dbPath('current/ingredients'),{name,qty:qtyEl.value.trim(),checked:false,storeId}).then(()=>setSyncDot('online'));lbAddedItems.push({name,qty:qtyEl.value.trim(),storeId});nameEl.value='';qtyEl.value='';renderLbAddedList();nameEl.focus();};
+window.lbAddIngredient=function(){const nameEl=document.getElementById('lb-new-item');const qtyEl=document.getElementById('lb-new-qty');const storeEl=document.getElementById('lb-new-store');const name=nameEl.value.trim();if(!name){nameEl.focus();return;}const storeId=(storeEl&&storeEl.value)||UNCAT;setSyncDot('syncing');push(dbPath('current/ingredients'),{name,qty:qtyEl.value.trim(),checked:false,storeId,createdAt:new Date().toISOString()}).then(()=>setSyncDot('online'));lbAddedItems.push({name,qty:qtyEl.value.trim(),storeId});nameEl.value='';qtyEl.value='';renderLbAddedList();nameEl.focus();};
 function renderLbAddedList(){const el=document.getElementById('lb-added-list');const hint=document.getElementById('lb-empty-hint');if(!lbAddedItems.length){el.innerHTML='';hint.style.display='block';return;}hint.style.display='none';el.innerHTML='';lbAddedItems.forEach(item=>{const div=document.createElement('div');div.className='lightbox-added-item';const sid=item.storeId||UNCAT;const tagClass='lightbox-added-store'+(sid===UNCAT?' uncat':'');div.innerHTML=`<span class="lightbox-added-check">✓</span><span class="lightbox-added-name">${esc(item.name)}</span><span class="lightbox-added-qty">${esc(item.qty||'')}</span>${storeList().length>0?`<span class="${tagClass}">${esc(storeName(sid))}</span>`:''}`;el.appendChild(div);});}
 
 // ── FAVORITES ──
@@ -1075,7 +1092,7 @@ window.closeReviewSheet=function(){document.getElementById('review-sheet').style
 function renderReviewList(){const el=document.getElementById('review-ingredient-list');el.innerHTML='';pendingReviewIngredients.forEach((item,idx)=>{const div=document.createElement('div');div.className='review-ingredient-item';const sid=item.storeId||UNCAT;const tagClass='review-ingredient-store'+(sid===UNCAT?' uncat':'');div.innerHTML=`<input type="checkbox" ${item.checked?'checked':''} onchange="reviewToggle(${idx})" /><span class="review-ingredient-name">${esc(item.name)}</span><span class="review-ingredient-qty">${esc(item.qty||'')}</span>${storeList().length>0?`<span class="${tagClass}">${esc(storeName(sid))}</span>`:''}`;el.appendChild(div);});}
 window.reviewToggle=function(idx){pendingReviewIngredients[idx].checked=!pendingReviewIngredients[idx].checked;};
 window.reviewAddItem=function(){const input=document.getElementById('review-new-item');const name=input.value.trim();if(!name)return;pendingReviewIngredients.push({name,qty:'',storeId:UNCAT,checked:true});input.value='';renderReviewList();};
-window.applyReviewIngredients=async function(){const toAdd=pendingReviewIngredients.filter(x=>x.checked);if(!toAdd.length){showToast('No ingredients selected.');return;}setSyncDot('syncing');await Promise.all(toAdd.map(item=>push(dbPath('current/ingredients'),{name:item.name,qty:item.qty||'',storeId:item.storeId||UNCAT,checked:false})));setSyncDot('online');closeReviewSheet();showView('current');showToast(`${toAdd.length} ingredient${toAdd.length>1?'s':''} added!`);setTimeout(()=>{const label=document.getElementById('ingredient-section-label');if(label)label.scrollIntoView({behavior:'smooth',block:'start'});},200);};
+window.applyReviewIngredients=async function(){const toAdd=pendingReviewIngredients.filter(x=>x.checked);if(!toAdd.length){showToast('No ingredients selected.');return;}setSyncDot('syncing');await Promise.all(toAdd.map(item=>push(dbPath('current/ingredients'),{name:item.name,qty:item.qty||'',storeId:item.storeId||UNCAT,checked:false,createdAt:new Date().toISOString()})));setSyncDot('online');closeReviewSheet();showView('current');showToast(`${toAdd.length} ingredient${toAdd.length>1?'s':''} added!`);setTimeout(()=>{const label=document.getElementById('ingredient-section-label');if(label)label.scrollIntoView({behavior:'smooth',block:'start'});},200);};
 
 // ── MODALS ──
 window.openSwitchModal=function(){renderSwitchModal();document.getElementById('switch-modal').style.display='flex';};
@@ -1086,7 +1103,7 @@ function renderSettingsStoreList(){const el=document.getElementById('settings-st
 
 window.showView=function(name){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));document.getElementById('view-'+name).classList.add('active');if(name==='current')document.querySelectorAll('.nav-btn')[0].classList.add('active');if(name==='favorites'){document.querySelectorAll('.nav-btn')[1].classList.add('active');renderFavorites();}if(name==='history'){document.querySelectorAll('.nav-btn')[2].classList.add('active');renderHistory();}};
 window.pushTitle=function(){ignoreNextTitle=true;set(dbPath('current/title'),document.getElementById('list-title').value);};
-window.debouncePushRecipe=function(dateKey,field,value){const timerKey=dateKey+'_'+field;clearTimeout(recipeTimers[timerKey]);recipeTimers[timerKey]=setTimeout(()=>{if(!localRecipes[dateKey])localRecipes[dateKey]={};localRecipes[dateKey][field]=value;update(dbPath('current/recipes/'+dateKey),{[field]:value});},600);};
+window.debouncePushRecipe=function(dateKey,field,value){const timerKey=dateKey+'_'+field;clearTimeout(recipeTimers[timerKey]);recipeTimers[timerKey]=setTimeout(()=>{if(!localRecipes[dateKey])localRecipes[dateKey]={};const isNew=!localRecipes[dateKey].createdAt;localRecipes[dateKey][field]=value;const updates={[field]:value,updatedAt:new Date().toISOString()};if(isNew)updates.createdAt=new Date().toISOString();update(dbPath('current/recipes/'+dateKey),updates);},600);};
 
 window.saveToHistory=async function(){const title=document.getElementById('list-title').value.trim()||'Grocery List';const now=new Date();const snap=await get(dbPath('current'));const current=snap.val()||{};setSyncDot('syncing');push(dbPath('history'),{id:Date.now(),title,date:now.toISOString(),dateLabel:formatDate(now),recipes:current.recipes||{},ingredients:current.ingredients||{}}).then(()=>{setSyncDot('online');showToast('Saved to history!');});};
 
@@ -1118,13 +1135,13 @@ function bootFamily(key){
   document.getElementById('loading-screen').style.display='flex';document.getElementById('main-content').style.display='none';
   showView('current');activeListeners.forEach(({r,fn})=>off(r,'value',fn));activeListeners=[];
   localIngredients={};localRecipes={};localStores={};localFavorites={};historyData={};
-  localCooks={};localCookbooks=[];localResetDay=null;localLastResetDate=null;activeTab='all';
+  localCooks={};localCookbooks={};localResetDay=null;localLastResetDate=null;activeTab='all';
   const now=new Date();document.getElementById('list-date').textContent='— '+formatDateFull(now)+' —';
   get(dbPath('current/title')).then(async snap=>{
     document.getElementById('loading-screen').style.display='none';document.getElementById('main-content').style.display='block';
     const weekOf = new Date(now.getTime() - 24*60*60*1000);
     if(!snap.val())set(dbPath('current/title'),'Week of '+weekOf.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}));
-    setSyncDot('online');attachListeners();maybeShowPermissionBanner();migrateRecipesToDates();
+    setSyncDot('online');attachListeners();maybeShowPermissionBanner();migrateRecipesToDates();purgeExpiredAudit();
   }).catch(()=>{document.getElementById('loading-screen').innerHTML='<div style="color:var(--rust);font-style:italic;text-align:center;padding:0 24px;">Could not connect.<br>Check your internet.</div>';});
 }
 
@@ -1135,7 +1152,7 @@ function attachListeners(){
   listen('current/recipes',snap=>{const incoming=snap.val()||{};const focused=document.querySelectorAll('.recipe-cell textarea:focus,.recipe-cell input:focus').length>0;localRecipes=incoming;if(!focused)buildRecipeGrid();setSyncDot('online');});
   listen('stores',snap=>{localStores=snap.val()||{};rebuildStoreTabs();rebuildAllStoreSelects();renderIngredients();if(document.getElementById('settings-modal').style.display!=='none')renderSettingsStoreList();setSyncDot('online');});
   listen('cooks',snap=>{localCooks=snap.val()||{};buildRecipeGrid();if(document.getElementById('cook-picker-sheet').style.display!=='none'&&cookPickerDateKey!==null){const r=localRecipes[cookPickerDateKey]||{};renderCookPickerList(r.cookKey);}setSyncDot('online');});
-  listen('cookbooks',snap=>{const val=snap.val();localCookbooks=Array.isArray(val)?val:[];if(document.getElementById('cookbook-sheet').style.display!=='none'&&cookbookPickerDateKey!==null){const r=localRecipes[cookbookPickerDateKey]||{};renderCookbookList(r.cookbook||'');}setSyncDot('online');});
+  listen('cookbooks',snap=>{const val=snap.val();if(Array.isArray(val)){migrateArrayCookbooks(val);return;}localCookbooks=val&&typeof val==='object'?val:{};if(document.getElementById('cookbook-sheet').style.display!=='none'&&cookbookPickerDateKey!==null){const r=localRecipes[cookbookPickerDateKey]||{};renderCookbookList(r.cookbook||'');}setSyncDot('online');});
   listen('favorites',snap=>{localFavorites=snap.val()||{};if(document.getElementById('view-favorites').classList.contains('active'))renderFavorites();setSyncDot('online');});
   listen('history',snap=>{historyData=snap.val()||{};if(document.getElementById('view-history').classList.contains('active'))renderHistory();});
   listen('settings/resetDay',async snap=>{const val=snap.val();localResetDay=(val===null||val===undefined)?null:val;updateResetDayBadge();await checkAutoReset();});
