@@ -691,6 +691,7 @@ let currentFamily=null,allFamilies={};
 let localIngredients={},localRecipes={},localStores={},localFavorites={},historyData={};
 let localCooks={};       // { cookKey: { name, colorIdx } }
 let localCookbooks={};   // {key: {name, createdAt}}
+let localWeekStartDate=null;
 let localResetDay=null,localLastResetDate=null;
 let activeTab='all';
 let lightboxDateKey=null,lightboxPhotoKeys=[],lightboxPhotoIndex=0,swipeStartX=0;
@@ -706,7 +707,18 @@ function formatDateFull(d){return d.toLocaleDateString('en-US',{weekday:'long',y
 function formatDate(d){return d.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});}
 function toISODate(d){return d.toISOString().slice(0,10);}
 function dayNameFromIso(isoDate){const d=new Date(isoDate+'T12:00:00');return DAYS[JS_DAY_TO_IDX[d.getDay()]];}
-function rollingWindow(){const now=new Date();const dates=[];for(let i=0;i<7;i++){const d=new Date(now);d.setDate(now.getDate()+i);dates.push(toISODate(d));}return dates;}
+function getMostRecentResetDay(){
+  const targetIdx=(localResetDay!==null&&localResetDay!==undefined)?localResetDay:5;
+  const now=new Date();const todayIdx=JS_DAY_TO_IDX[now.getDay()];
+  const daysBack=(todayIdx-targetIdx+7)%7;
+  const d=new Date(now);d.setDate(now.getDate()-daysBack);return toISODate(d);
+}
+function rollingWindow(){
+  const start=localWeekStartDate||getMostRecentResetDay();
+  const dates=[];
+  for(let i=0;i<7;i++){const d=new Date(start+'T12:00:00');d.setDate(d.getDate()+i);dates.push(toISODate(d));}
+  return dates;
+}
 function labelForRecipeKey(key){if(/^[0-6]$/.test(key))return DAYS[parseInt(key)];return dayNameFromIso(key);}
 async function writeAudit(action,recordType,recordId,data){
   const expiresAt=Date.now()+(90*24*60*60*1000);
@@ -722,6 +734,20 @@ async function migrateArrayCookbooks(arr){
   const newCookbooks={};
   arr.forEach((name,i)=>{if(name)newCookbooks[`cb${i}_${Date.now()}`]={name,createdAt:new Date().toISOString()};});
   await set(dbPath('cookbooks'),Object.keys(newCookbooks).length?newCookbooks:null);
+}
+async function initWeekStart(){
+  const [rdSnap,wsSnap]=await Promise.all([get(dbPath('settings/resetDay')),get(dbPath('current/weekStartDate'))]);
+  const rdVal=rdSnap.val();const updates={};
+  if(rdVal===null||rdVal===undefined)updates[`households/${currentFamily}/settings/resetDay`]=5;
+  if(!wsSnap.val()){
+    const effectiveRd=(rdVal!==null&&rdVal!==undefined)?rdVal:5;
+    const now=new Date();const todayIdx=JS_DAY_TO_IDX[now.getDay()];
+    const daysBack=(todayIdx-effectiveRd+7)%7;
+    const d=new Date(now);d.setDate(now.getDate()-daysBack);
+    updates[`households/${currentFamily}/current/weekStartDate`]=toISODate(d);
+    updates[`households/${currentFamily}/current/title`]='Week of '+d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  }
+  if(Object.keys(updates).length)await update(dbRef(db),updates);
 }
 async function migrateRecipesToDates(){
   const snap=await get(dbPath('current/recipes'));const recipes=snap.val();if(!recipes)return;
@@ -885,7 +911,7 @@ async function doArchiveAndClear(askConfirm){
   const snap=await get(dbPath('current'));const current=snap.val()||{};
   if(Object.keys(current).length>0){await push(dbPath('history'),{id:Date.now(),title,date:now.toISOString(),dateLabel:formatDate(now),recipes:current.recipes||{},ingredients:current.ingredients||{}});}
   const newTitle='Week of '+now.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
-  setSyncDot('syncing');await set(dbPath('current'),{title:newTitle,recipes:{},ingredients:{}});setSyncDot('online');return true;
+  setSyncDot('syncing');await set(dbPath('current'),{title:newTitle,recipes:{},ingredients:{},weekStartDate:toISODate(now)});setSyncDot('online');return true;
 }
 window.startNewWeek=async function(){const ok=await doArchiveAndClear(true);if(ok)showToast('New week started — previous week archived!');};
 
@@ -1125,7 +1151,7 @@ window.renderHistory=function(){
   });
 };
 window.toggleHistCard=function(idx){const body=document.getElementById('hist-body-'+idx);const arrow=document.getElementById('hist-arrow-'+idx);body.classList.toggle('open');arrow.textContent=body.classList.contains('open')?'∨':'›';};
-window.loadList=function(key){const list=historyData[key];if(!list)return;if(!confirm('Load this list? It will replace the current list.'))return;setSyncDot('syncing');set(dbPath('current'),{title:list.title,recipes:list.recipes||{},ingredients:list.ingredients||{}}).then(()=>{setSyncDot('online');showView('current');showToast('List loaded!');});};
+window.loadList=function(key){const list=historyData[key];if(!list)return;if(!confirm('Load this list? It will replace the current list.'))return;setSyncDot('syncing');set(dbPath('current'),{title:list.title,recipes:list.recipes||{},ingredients:list.ingredients||{},weekStartDate:localWeekStartDate||null}).then(()=>{setSyncDot('online');showView('current');showToast('List loaded!');});};
 window.deleteHistoryItem=function(key){if(!confirm('Delete this list from history?'))return;remove(dbPath('history/'+key)).then(()=>showToast('Deleted.'));};
 
 // ── BOOT ──
@@ -1135,18 +1161,19 @@ function bootFamily(key){
   document.getElementById('loading-screen').style.display='flex';document.getElementById('main-content').style.display='none';
   showView('current');activeListeners.forEach(({r,fn})=>off(r,'value',fn));activeListeners=[];
   localIngredients={};localRecipes={};localStores={};localFavorites={};historyData={};
-  localCooks={};localCookbooks={};localResetDay=null;localLastResetDate=null;activeTab='all';
+  localCooks={};localCookbooks={};localResetDay=null;localLastResetDate=null;localWeekStartDate=null;activeTab='all';
   const now=new Date();document.getElementById('list-date').textContent='— '+formatDateFull(now)+' —';
   get(dbPath('current/title')).then(async snap=>{
     document.getElementById('loading-screen').style.display='none';document.getElementById('main-content').style.display='block';
     const weekOf = new Date(now.getTime() - 24*60*60*1000);
     if(!snap.val())set(dbPath('current/title'),'Week of '+weekOf.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}));
-    setSyncDot('online');attachListeners();maybeShowPermissionBanner();migrateRecipesToDates();purgeExpiredAudit();
+    setSyncDot('online');attachListeners();maybeShowPermissionBanner();migrateRecipesToDates();purgeExpiredAudit();initWeekStart();
   }).catch(()=>{document.getElementById('loading-screen').innerHTML='<div style="color:var(--rust);font-style:italic;text-align:center;padding:0 24px;">Could not connect.<br>Check your internet.</div>';});
 }
 
 function attachListeners(){
   function listen(path,fn){const r=dbPath(path);onValue(r,fn);activeListeners.push({r,fn});}
+  listen('current/weekStartDate',snap=>{localWeekStartDate=snap.val()||null;buildRecipeGrid();});
   listen('current/title',snap=>{if(ignoreNextTitle){ignoreNextTitle=false;return;}const el=document.getElementById('list-title');if(document.activeElement!==el)el.value=snap.val()||'';});
   listen('current/ingredients',snap=>{localIngredients=snap.val()||{};rebuildStoreTabs();rebuildAllStoreSelects();renderIngredients();setSyncDot('online');});
   listen('current/recipes',snap=>{const incoming=snap.val()||{};const focused=document.querySelectorAll('.recipe-cell textarea:focus,.recipe-cell input:focus').length>0;localRecipes=incoming;if(!focused)buildRecipeGrid();setSyncDot('online');});
