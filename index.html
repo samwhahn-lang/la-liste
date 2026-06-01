@@ -132,6 +132,7 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
 .qty-trigger.empty{color:var(--ink-faint);}
 .qty-trigger.edit-style{width:100%;border:1px solid var(--border-strong);border-radius:6px;padding:10px 12px;background:white;font-size:15px;display:block;}
 .qty-trigger.edit-style.empty{color:var(--ink-faint);}
+.lightbox-add-row .qty-trigger{font-size:14px;padding:7px 2px;width:65px;}
 .qty-quick-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;}
 .qty-quick-btn{background:var(--sage-light);border:1.5px solid transparent;border-radius:10px;padding:16px 0;font-family:var(--sans);font-size:20px;font-weight:600;color:var(--sage);cursor:pointer;transition:all .15s;}
 .qty-quick-btn.selected{background:var(--sage);color:white;}
@@ -598,7 +599,8 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
     <div class="lightbox-bottom-title">Add ingredients from this photo</div>
     <div class="lightbox-add-row">
       <input class="lb-item" id="lb-new-item" placeholder="Ingredient" onkeydown="if(event.key==='Enter')lbAddIngredient()" />
-      <input class="lb-qty" id="lb-new-qty" placeholder="Qty" onkeydown="if(event.key==='Enter')lbAddIngredient()" />
+      <button class="qty-trigger empty" id="lb-new-qty-btn" type="button" onclick="openQtyPicker('lb-new')">Qty</button>
+      <input type="hidden" id="lb-new-qty" value="" />
       <select class="store-select" id="lb-new-store"></select>
       <button class="lightbox-add-btn" onclick="lbAddIngredient()">+ Add</button>
     </div>
@@ -1155,10 +1157,10 @@ function updateLightboxMeta(){
 window.openRecipeLightbox=function(i,si){openLightboxForDay(i,si||0);};
 window.openHistoryLightbox=function(url,caption){lightboxDateKey=null;lightboxPhotoKeys=[];const track=document.getElementById('photo-swiper-track');track.innerHTML=`<div class="photo-swiper-slide"><img src="${esc(url)}" alt="" /></div>`;document.getElementById('photo-dots').innerHTML='';document.getElementById('lightbox-caption').textContent=caption;document.getElementById('lightbox-top-actions').innerHTML='';const lb=document.getElementById('lightbox');lb.classList.add('photo-only');document.getElementById('lightbox-bottom').style.display='none';const prev=document.getElementById('swiper-prev');const next=document.getElementById('swiper-next');if(prev)prev.style.display='none';if(next)next.style.display='none';lb.style.display='flex';};
 window.openFavLightbox=function(url,caption){window.openHistoryLightbox(url,caption);};
-window.closeLightbox=function(){document.getElementById('lightbox').style.display='none';lbAddedItems=[];document.getElementById('lb-new-item').value='';document.getElementById('lb-new-qty').value='';};
+window.closeLightbox=function(){document.getElementById('lightbox').style.display='none';lbAddedItems=[];document.getElementById('lb-new-item').value='';document.getElementById('lb-new-qty').value='';const lbQtyBtn=document.getElementById('lb-new-qty-btn');if(lbQtyBtn){lbQtyBtn.textContent='Qty';lbQtyBtn.classList.add('empty');}};
 document.getElementById('lightbox').addEventListener('click',function(e){if(e.target===this)closeLightbox();});
 
-window.lbAddIngredient=function(){const nameEl=document.getElementById('lb-new-item');const qtyEl=document.getElementById('lb-new-qty');const storeEl=document.getElementById('lb-new-store');const name=nameEl.value.trim();if(!name){nameEl.focus();return;}const storeId=(storeEl&&storeEl.value)||UNCAT;setSyncDot('syncing');push(dbPath('current/ingredients'),{name,qty:qtyEl.value.trim(),checked:false,storeId,createdAt:new Date().toISOString()}).then(()=>setSyncDot('online'));lbAddedItems.push({name,qty:qtyEl.value.trim(),storeId});nameEl.value='';qtyEl.value='';renderLbAddedList();nameEl.focus();};
+window.lbAddIngredient=function(){const nameEl=document.getElementById('lb-new-item');const qtyEl=document.getElementById('lb-new-qty');const storeEl=document.getElementById('lb-new-store');const name=nameEl.value.trim();if(!name){nameEl.focus();return;}const storeId=(storeEl&&storeEl.value)||UNCAT;setSyncDot('syncing');push(dbPath('current/ingredients'),{name,qty:qtyEl.value.trim(),checked:false,storeId,createdAt:new Date().toISOString()}).then(()=>setSyncDot('online'));lbAddedItems.push({name,qty:qtyEl.value.trim(),storeId});nameEl.value='';qtyEl.value='';const lbQtyBtn=document.getElementById('lb-new-qty-btn');if(lbQtyBtn){lbQtyBtn.textContent='Qty';lbQtyBtn.classList.add('empty');}renderLbAddedList();nameEl.focus();};
 function renderLbAddedList(){const el=document.getElementById('lb-added-list');const hint=document.getElementById('lb-empty-hint');if(!lbAddedItems.length){el.innerHTML='';hint.style.display='block';return;}hint.style.display='none';el.innerHTML='';lbAddedItems.forEach(item=>{const div=document.createElement('div');div.className='lightbox-added-item';const sid=item.storeId||UNCAT;const tagClass='lightbox-added-store'+(sid===UNCAT?' uncat':'');div.innerHTML=`<span class="lightbox-added-check">✓</span><span class="lightbox-added-name">${esc(item.name)}</span><span class="lightbox-added-qty">${esc(item.qty||'')}</span>${storeList().length>0?`<span class="${tagClass}">${esc(storeName(sid))}</span>`:''}`;el.appendChild(div);});}
 
 // ── FAVORITES ──
