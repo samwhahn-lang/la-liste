@@ -128,6 +128,18 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
 .ingredient-add-row input::placeholder{color:var(--ink-faint);}
 .ingredient-add-row input.item-input{flex:1;min-width:120px;}
 .ingredient-add-row input.qty-input{width:70px;}
+.qty-trigger{background:transparent;border:none;border-bottom:1px solid var(--border-strong);outline:none;font-family:var(--sans);font-size:15px;color:var(--ink);padding:8px 2px;width:70px;text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.qty-trigger.empty{color:var(--ink-faint);}
+.qty-trigger.edit-style{width:100%;border:1px solid var(--border-strong);border-radius:6px;padding:10px 12px;background:white;font-size:15px;display:block;}
+.qty-trigger.edit-style.empty{color:var(--ink-faint);}
+.qty-quick-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;}
+.qty-quick-btn{background:var(--sage-light);border:1.5px solid transparent;border-radius:10px;padding:16px 0;font-family:var(--sans);font-size:20px;font-weight:600;color:var(--sage);cursor:pointer;transition:all .15s;}
+.qty-quick-btn.selected{background:var(--sage);color:white;}
+.qty-quick-btn:active{opacity:.8;}
+.qty-custom-row{display:flex;gap:8px;align-items:center;margin-bottom:4px;}
+.qty-custom-row .edit-input{flex:1;margin:0;}
+.qty-set-btn{background:var(--sage);color:white;border:none;border-radius:6px;padding:10px 16px;font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.qty-clear-link{font-size:12px;color:var(--ink-faint);background:none;border:none;cursor:pointer;padding:4px 0;font-family:var(--sans);}
 .store-select{background:transparent;border:none;border-bottom:1px solid var(--border-strong);outline:none;font-family:var(--sans);font-size:13px;color:var(--ink-muted);padding:8px 18px 8px 2px;cursor:pointer;max-width:130px;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23a09890'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 4px center;}
 .add-btn{background:var(--ink);color:var(--cream);border:none;border-radius:4px;padding:12px 18px;font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;flex-shrink:0;}
 .add-store-btn{background:var(--ink);color:var(--cream);border:none;border-radius:4px;padding:6px 10px;font-family:var(--sans);font-size:11px;font-weight:600;cursor:pointer;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;margin-left:8px;}
@@ -448,7 +460,8 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
       <div class="ingredient-list">
         <div class="ingredient-add-row">
           <input class="item-input" id="new-item" placeholder="Item name" onkeydown="if(event.key==='Enter')addIngredient()" />
-          <input class="qty-input" id="new-qty" placeholder="Qty" onkeydown="if(event.key==='Enter')addIngredient()" />
+          <button class="qty-trigger empty" id="new-qty-btn" type="button" onclick="openQtyPicker('new')">Qty</button>
+          <input type="hidden" id="new-qty" value="" />
           <select class="store-select" id="new-store"></select>
           <button class="add-btn" onclick="addIngredient()">+ Add</button>
           <button class="add-store-btn" onclick="addNewStore()">+ Store</button>
@@ -600,10 +613,32 @@ body{font-family:var(--sans);background:var(--cream);color:var(--ink);font-size:
   <div class="sheet-box">
     <div class="sheet-title">Edit ingredient</div>
     <div class="edit-field"><label class="edit-label">Item name</label><input class="edit-input" id="edit-name" /></div>
-    <div class="edit-field"><label class="edit-label">Quantity (optional)</label><input class="edit-input" id="edit-qty" /></div>
+    <div class="edit-field"><label class="edit-label">Quantity (optional)</label><button class="edit-input qty-trigger edit-style empty" id="edit-qty-btn" type="button" onclick="openQtyPicker('edit')">—</button><input type="hidden" id="edit-qty" value="" /></div>
     <div class="edit-field"><label class="edit-label">Store</label><select class="edit-store-select" id="edit-store"></select></div>
     <button class="sheet-confirm" onclick="saveEditIngredient()">Save changes</button>
     <button class="sheet-cancel" onclick="closeEditSheet()">Cancel</button>
+  </div>
+</div>
+
+<!-- QTY PICKER SHEET -->
+<div id="qty-picker-sheet" class="sheet-overlay" style="display:none;" onclick="if(event.target.id==='qty-picker-sheet')closeQtyPicker()">
+  <div class="sheet-box">
+    <div class="sheet-title">Quantity</div>
+    <div class="qty-quick-grid">
+      <button class="qty-quick-btn" onclick="selectQty('1')">1</button>
+      <button class="qty-quick-btn" onclick="selectQty('2')">2</button>
+      <button class="qty-quick-btn" onclick="selectQty('3')">3</button>
+      <button class="qty-quick-btn" onclick="selectQty('4')">4</button>
+      <button class="qty-quick-btn" onclick="selectQty('5')">5</button>
+    </div>
+    <div class="qty-custom-row">
+      <input class="edit-input" id="qty-custom-input" placeholder="Custom value…" onkeydown="if(event.key==='Enter')selectQtyCustom()" />
+      <button class="qty-set-btn" onclick="selectQtyCustom()">Set</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+      <button class="qty-clear-link" onclick="selectQty('')">Clear</button>
+      <button class="sheet-cancel" style="width:auto;margin:0;padding:10px 24px;" onclick="closeQtyPicker()">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -946,13 +981,36 @@ window.openStorePicker=function(itemId){const item=localIngredients[itemId];cons
 window.closeStorePicker=function(){document.getElementById('store-picker-modal').style.display='none';};
 async function assignStore(itemId,storeId){closeStorePicker();setSyncDot('syncing');await update(dbPath('current/ingredients/'+itemId),{storeId});setSyncDot('online');}
 
+// ── QTY PICKER ──
+let qtyPickerTarget=null;
+window.openQtyPicker=function(target){
+  qtyPickerTarget=target;
+  const current=document.getElementById(target+'-qty').value||'';
+  document.getElementById('qty-custom-input').value=current;
+  document.querySelectorAll('.qty-quick-btn').forEach(btn=>btn.classList.toggle('selected',btn.textContent===current));
+  document.getElementById('qty-picker-sheet').style.display='flex';
+  setTimeout(()=>document.getElementById('qty-custom-input').focus(),120);
+};
+window.closeQtyPicker=function(){document.getElementById('qty-picker-sheet').style.display='none';qtyPickerTarget=null;};
+window.selectQty=function(val){
+  if(qtyPickerTarget===null)return;
+  document.getElementById(qtyPickerTarget+'-qty').value=val;
+  const btn=document.getElementById(qtyPickerTarget+'-qty-btn');
+  if(btn){btn.textContent=val||'—';btn.classList.toggle('empty',!val);}
+  closeQtyPicker();
+};
+window.selectQtyCustom=function(){
+  const val=document.getElementById('qty-custom-input').value.trim();
+  selectQty(val);
+};
+
 // ── INGREDIENT EDIT ──
-window.openEditSheet=function(id){const item=localIngredients[id];if(!item)return;editingItemId=id;document.getElementById('edit-name').value=item.name||'';document.getElementById('edit-qty').value=item.qty||'';rebuildStoreSelect('edit-store');document.getElementById('edit-store').value=item.storeId||UNCAT;document.getElementById('edit-sheet').style.display='flex';};
+window.openEditSheet=function(id){const item=localIngredients[id];if(!item)return;editingItemId=id;document.getElementById('edit-name').value=item.name||'';const qty=item.qty||'';document.getElementById('edit-qty').value=qty;const qtyBtn=document.getElementById('edit-qty-btn');if(qtyBtn){qtyBtn.textContent=qty||'—';qtyBtn.classList.toggle('empty',!qty);}rebuildStoreSelect('edit-store');document.getElementById('edit-store').value=item.storeId||UNCAT;document.getElementById('edit-sheet').style.display='flex';};
 window.closeEditSheet=function(){document.getElementById('edit-sheet').style.display='none';editingItemId=null;};
 window.saveEditIngredient=async function(){if(!editingItemId)return;const name=document.getElementById('edit-name').value.trim();if(!name){showToast('Name is required.');return;}setSyncDot('syncing');await update(dbPath('current/ingredients/'+editingItemId),{name,qty:document.getElementById('edit-qty').value.trim(),storeId:document.getElementById('edit-store').value||UNCAT,updatedAt:new Date().toISOString()});setSyncDot('online');closeEditSheet();showToast('Ingredient updated.');};
 
 // ── INGREDIENTS ──
-window.addIngredient=function(){const nameEl=document.getElementById('new-item');const qtyEl=document.getElementById('new-qty');const storeEl=document.getElementById('new-store');const name=nameEl.value.trim();if(!name){nameEl.focus();return;}setSyncDot('syncing');push(dbPath('current/ingredients'),{name,qty:qtyEl.value.trim(),checked:false,storeId:(storeEl&&storeEl.value)||UNCAT,createdAt:new Date().toISOString()}).then(()=>setSyncDot('online'));nameEl.value='';qtyEl.value='';nameEl.focus();};
+window.addIngredient=function(){const nameEl=document.getElementById('new-item');const qtyEl=document.getElementById('new-qty');const storeEl=document.getElementById('new-store');const name=nameEl.value.trim();if(!name){nameEl.focus();return;}setSyncDot('syncing');push(dbPath('current/ingredients'),{name,qty:qtyEl.value.trim(),checked:false,storeId:(storeEl&&storeEl.value)||UNCAT,createdAt:new Date().toISOString()}).then(()=>setSyncDot('online'));nameEl.value='';qtyEl.value='';const qtyBtn=document.getElementById('new-qty-btn');if(qtyBtn){qtyBtn.textContent='Qty';qtyBtn.classList.add('empty');}nameEl.focus();};
 window.toggleItem=function(id,cur){setSyncDot('syncing');update(dbPath('current/ingredients/'+id),{checked:!cur}).then(()=>setSyncDot('online'));};
 window.deleteItem=async function(id){setSyncDot('syncing');await writeAudit('delete','ingredient',id,localIngredients[id]||{});await remove(dbPath('current/ingredients/'+id));setSyncDot('online');};
 
